@@ -61,11 +61,16 @@ func (tm *TunManager) CheckDependencies() error {
 
 // Start launches tun2socks and configures the TUN adapter.
 func (tm *TunManager) Start(ctx context.Context, resolver *Resolver) error {
-	// Start tun2socks process with info log level to capture traffic
+	// Start tun2socks process with info log level to capture traffic.
+	// -tcp-auto-tuning: enables TCP receive buffer auto-tuning for better throughput
+	// -udp-timeout 30s: reduces UDP session lifetime from default (5m) to 30s,
+	//   so DNS-related SOCKS connections close faster and don't pile up in TIME_WAIT.
 	tm.cmd = exec.CommandContext(ctx, tm.cfg.Tun2SocksPath,
 		"-device", "tun://"+tm.cfg.TunName,
 		"-proxy", "socks5://"+tm.cfg.SOCKS5,
 		"-loglevel", "info",
+		"-tcp-auto-tuning",
+		"-udp-timeout", "30s",
 	)
 
 	stdout, err := tm.cmd.StdoutPipe()
@@ -129,6 +134,7 @@ func (tm *TunManager) configureAdapter() error {
 	// realizes it can't route DNS through the TUN.
 	// We force the metric to 9999 to give it the lowest possible priority.
 	_ = exec.Command("netsh", "interface", "ipv4", "set", "interface", tm.cfg.TunName, "metric=9999").Run()
+
 	log.Printf("  ✓ TUN adapter configured: %s/%s (no default gateway)", tm.cfg.TunAddr, tm.cfg.TunMask)
 	return nil
 }
@@ -196,6 +202,7 @@ func (tm *TunManager) monitorLogs(r io.Reader, resolver *Resolver) {
 					if domain := resolver.DomainForIP(destIP); domain != "" {
 						msg = fmt.Sprintf("%s (%s)", msg, domain)
 					}
+
 				}
 
 				fmt.Printf("  [redirect] %s\n", msg)

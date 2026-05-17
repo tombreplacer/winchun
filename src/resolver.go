@@ -8,9 +8,9 @@ import (
 
 // Resolver resolves domain names to IP addresses and caches the results.
 type Resolver struct {
-	mu      sync.RWMutex
+	mu sync.RWMutex
 	// domain → set of IPs
-	cache   map[string]map[string]bool
+	cache map[string]map[string]bool
 	// IP → domain (reverse lookup for logging)
 	reverse map[string]string
 }

@@ -4,9 +4,13 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
+	"net"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -28,6 +32,12 @@ func main() {
 	cfg, err := LoadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("✗ Config: %v", err)
+	}
+
+	// Setup logging based on config
+	logCleanup := setupLogging(cfg)
+	if logCleanup != nil {
+		defer logCleanup()
 	}
 
 	// Extract embedded binaries and override path
@@ -74,6 +84,31 @@ func main() {
 		log.Fatalf("✗ TUN: %v", err)
 	}
 
+	// Initialize WFP to block proxy loop
+	wfp, err := NewWFPManager(cfg)
+	if err != nil {
+		log.Printf("  ⚠ WFP Init failed (needs Administrator?): %v", err)
+	} else {
+		// Extract port from SOCKS5
+		port := cfg.SOCKS5
+		idx := strings.LastIndex(port, ":")
+		if idx != -1 {
+			port = port[idx+1:]
+		}
+
+		log.Printf("━━━ WFP Anti-Loop ━━━")
+		log.Printf("  Finding proxy process listening on port %s...", port)
+		proxyExe := FindProcessByPort(port)
+		if proxyExe != "" {
+			log.Printf("  Found proxy process: %s", proxyExe)
+			if err := wfp.BlockProcessOnTUN(proxyExe); err != nil {
+				log.Printf("  ⚠ WFP block failed: %v", err)
+			}
+		} else {
+			log.Printf("  ⚠ Proxy process not found on port %s. WFP loop block skipped.", port)
+		}
+	}
+
 	// Initialize route manager and add routes
 	// We bind routes directly to the interface by name ("winchun0")
 	routes := NewRouteManager(cfg.TunName)
@@ -84,6 +119,9 @@ func main() {
 	// Also add route for SOCKS proxy server itself to go DIRECT (avoid loop)
 	log.Println("━━━ Anti-loop route ━━━")
 	addAntiLoopRoute(cfg)
+
+	// WARM UP NETWORK STACK (Fixes UDP Source IP Bug in Windows)
+	warmupNetwork()
 
 	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	log.Printf("✓ WinChun is active! %d IPs routed through SOCKS", len(added))
@@ -123,14 +161,24 @@ func main() {
 	log.Println("━━━ Cleanup ━━━")
 	routes.Cleanup()
 	tun.Stop()
+	if wfp != nil {
+		wfp.Close()
+	}
 
 	log.Println("✓ WinChun stopped. Bye!")
 }
 
-// addAntiLoopRoute ensures the SOCKS proxy itself is reachable directly
-// (not routed through TUN, which would cause an infinite loop).
+// addAntiLoopRoute ensures the SOCKS proxy itself and any upstream IPs
+// are reachable directly (not routed through TUN, which would cause an infinite loop).
 func addAntiLoopRoute(cfg *Config) {
-	// Extract host from socks5 address
+	defRoute, err := GetDefaultRoute()
+	if err != nil {
+		log.Printf("  ⚠ Failed to get default route for anti-loop: %v", err)
+		return
+	}
+	log.Printf("  ✓ Default internet route via %s (gw: %s)", defRoute.InterfaceAlias, defRoute.NextHop)
+
+	// 1. Check SOCKS proxy IP itself
 	host := cfg.SOCKS5
 	for i := len(host) - 1; i >= 0; i-- {
 		if host[i] == ':' {
@@ -138,13 +186,81 @@ func addAntiLoopRoute(cfg *Config) {
 			break
 		}
 	}
-
-	// Skip if SOCKS is on localhost
-	if host == "127.0.0.1" || host == "localhost" || host == "::1" {
-		log.Printf("  SOCKS on localhost — no anti-loop route needed")
-		return
+	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+		log.Printf("  Adding bypass route for SOCKS proxy %s...", host)
+		if err := AddBypassRoute(host, defRoute); err != nil {
+			log.Printf("  ⚠ Failed to add bypass route for SOCKS %s: %v", host, err)
+		}
+	} else {
+		log.Printf("  SOCKS on localhost — no anti-loop route needed for SOCKS itself")
 	}
 
-	// Get default gateway and add explicit route for SOCKS server
-	log.Printf("  ⚠ SOCKS on %s — add a manual route if needed", host)
+	// 2. Check explicit Upstream IPs
+	for _, ip := range cfg.UpstreamIPs {
+		ip = strings.TrimSpace(ip)
+		if ip == "" {
+			continue
+		}
+		log.Printf("  Adding bypass route for upstream IP %s...", ip)
+		if err := AddBypassRoute(ip, defRoute); err != nil {
+			log.Printf("  ⚠ Failed to add bypass route for %s: %v", ip, err)
+		}
+	}
+}
+
+// warmupNetwork flushes the DNS cache and forces Windows to re-evaluate the routing table.
+func warmupNetwork() {
+	log.Println("━━━ Warming up network ━━━")
+	// Flush DNS cache to clear any bad state left over from adapter creation
+	_ = exec.Command("ipconfig", "/flushdns").Run()
+	log.Printf("  ✓ DNS cache flushed")
+
+	// Force Windows to re-evaluate routing table and Source IPs
+	// by making a quick TCP connection to a known stable IP.
+	// 8.8.8.8:53 is widely open for TCP DNS.
+	conn, err := net.DialTimeout("tcp", "8.8.8.8:53", 200*time.Millisecond)
+	if err == nil {
+		conn.Close()
+	}
+	log.Printf("  ✓ Network routing warmed up")
+}
+
+// setupLogging configures log output based on config settings.
+// Returns a cleanup function to close the log file (if any).
+func setupLogging(cfg *Config) func() {
+	// Determine if stdout logging is enabled (default: true)
+	stdoutEnabled := cfg.LogStdout == nil || *cfg.LogStdout
+
+	var writers []io.Writer
+
+	if stdoutEnabled {
+		writers = append(writers, os.Stdout)
+	}
+
+	var logFile *os.File
+	if cfg.LogFile != "" {
+		f, err := os.OpenFile(cfg.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			// Fall back to stdout-only if file can't be opened
+			log.Printf("⚠ Failed to open log file %s: %v", cfg.LogFile, err)
+		} else {
+			logFile = f
+			writers = append(writers, f)
+		}
+	}
+
+	if len(writers) == 0 {
+		// Both stdout and file are disabled — discard all logs
+		log.SetOutput(io.Discard)
+	} else if len(writers) == 1 {
+		log.SetOutput(writers[0])
+	} else {
+		log.SetOutput(io.MultiWriter(writers...))
+	}
+
+	// Return cleanup function
+	if logFile != nil {
+		return func() { logFile.Close() }
+	}
+	return nil
 }
