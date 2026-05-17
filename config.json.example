@@ -1,0 +1,17 @@
+{
+  "socks5": "127.0.0.1:10808",
+  "tun_name": "winchun0",
+  "tun_addr": "10.0.85.2",
+  "tun_gw": "10.0.85.1",
+  "tun_mask": "255.255.255.0",
+  "dns_refresh_seconds": 120,
+  "tun2socks_path": "third_party/tun2socks-v3.exe",
+  "domains": [
+    "chatgpt.com",
+    "*.chatgpt.com",
+    "openai.com",
+    "*.openai.com",
+    "*.youtube.com",
+    "ipinfo.io"
+  ]
+}

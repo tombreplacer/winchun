@@ -1,0 +1,34 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*" # Trigger workflow on tags starting with 'v' (e.g. v1.0.0)
+
+jobs:
+  build:
+    name: Build & Release
+    runs-on: windows-latest
+    permissions:
+      contents: write # Needed to create GitHub Release
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+
+      - name: Build Executable
+        run: |
+          go build -ldflags "-s -w" -o winchun.exe ./src
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            winchun.exe
+            config.json.example
+          generate_release_notes: true

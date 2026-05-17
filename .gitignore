@@ -1,0 +1,36 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Exceptions for required dependencies (so they can be pushed to repo)
+!src/third_party/*
+
+# WinChun specific files
+winchun_traffic.log
+config.json
+scratch/
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+
+# Dependency directories
+vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# env file
+.env
+
+# IDE / Editor
+.idea/
+.vscode/
+*.swp
+*.swo
