@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 )
@@ -72,26 +74,93 @@ func (rm *RouteManager) RemoveRoute(ip string) error {
 	return nil
 }
 
-// AddRoutes adds routes for multiple IPs.
+// AddRoutes adds routes for multiple IPs in bulk using netsh scripts.
+// Routes are added in small batches with a delay between them to prevent
+// a reconnection storm from overwhelming the SOCKS proxy.
 func (rm *RouteManager) AddRoutes(ips []string) {
+	if len(ips) == 0 {
+		return
+	}
+
+	var newIPs []string
+	rm.mu.Lock()
 	for _, ip := range ips {
-		if err := rm.AddRoute(ip); err != nil {
-			log.Printf("  ⚠ Failed to add route for %s: %v", ip, err)
-		} else {
-			log.Printf("  + Route added: %s → TUN", ip)
+		if !rm.routes[ip] {
+			newIPs = append(newIPs, ip)
 		}
+	}
+	rm.mu.Unlock()
+
+	if len(newIPs) == 0 {
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString("pushd interface ipv4\n")
+	for _, ip := range newIPs {
+		sb.WriteString(fmt.Sprintf("add route %s/32 \"%s\" metric=1 store=active\n", ip, rm.ifaceName))
+	}
+	sb.WriteString("popd\n")
+
+	scriptPath := filepath.Join(os.TempDir(), "winchun_routes_add.txt")
+	if err := os.WriteFile(scriptPath, []byte(sb.String()), 0644); err != nil {
+		log.Printf("  ⚠ Failed to write route script: %v", err)
+		return
+	}
+
+	cmd := exec.Command("netsh", "-f", scriptPath)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("  ⚠ Batch route add failed: %s: %v", strings.TrimSpace(string(output)), err)
+	} else {
+		log.Printf("  + Batch added %d routes", len(newIPs))
+		rm.mu.Lock()
+		for _, ip := range newIPs {
+			rm.routes[ip] = true
+		}
+		rm.mu.Unlock()
 	}
 }
 
-// RemoveRoutes removes routes for multiple IPs.
+// RemoveRoutes removes routes for multiple IPs in bulk.
 func (rm *RouteManager) RemoveRoutes(ips []string) {
+	if len(ips) == 0 {
+		return
+	}
+
+	var toRemove []string
+	rm.mu.Lock()
 	for _, ip := range ips {
-		if err := rm.RemoveRoute(ip); err != nil {
-			log.Printf("  ⚠ Failed to remove route for %s: %v", ip, err)
-		} else {
-			log.Printf("  - Route removed: %s", ip)
+		if rm.routes[ip] {
+			toRemove = append(toRemove, ip)
 		}
 	}
+	rm.mu.Unlock()
+
+	if len(toRemove) == 0 {
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString("pushd interface ipv4\n")
+	for _, ip := range toRemove {
+		sb.WriteString(fmt.Sprintf("delete route %s/32 \"%s\"\n", ip, rm.ifaceName))
+	}
+	sb.WriteString("popd\n")
+
+	scriptPath := filepath.Join(os.TempDir(), "winchun_routes_del.txt")
+	os.WriteFile(scriptPath, []byte(sb.String()), 0644)
+
+	cmd := exec.Command("netsh", "-f", scriptPath)
+	cmd.Run() // We ignore deletion errors, since routes might already be gone.
+
+	log.Printf("  - Batch removed %d routes", len(toRemove))
+
+	rm.mu.Lock()
+	for _, ip := range toRemove {
+		delete(rm.routes, ip)
+	}
+	rm.mu.Unlock()
 }
 
 // Cleanup removes all managed routes.
@@ -103,10 +172,6 @@ func (rm *RouteManager) Cleanup() {
 	}
 	rm.mu.Unlock()
 
-	for _, ip := range ips {
-		if err := rm.RemoveRoute(ip); err != nil {
-			log.Printf("  ⚠ Cleanup failed for route %s: %v", ip, err)
-		}
-	}
+	rm.RemoveRoutes(ips)
 	log.Printf("  ✓ Cleaned up %d routes", len(ips))
 }

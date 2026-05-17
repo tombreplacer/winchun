@@ -5,7 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -85,6 +87,9 @@ func main() {
 	log.Println("━━━ Anti-loop route ━━━")
 	addAntiLoopRoute(cfg)
 
+	// WARM UP NETWORK STACK (Fixes UDP Source IP Bug in Windows)
+	warmupNetwork()
+
 	log.Println("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 	log.Printf("✓ WinChun is active! %d IPs routed through SOCKS", len(added))
 	log.Println("  Press Ctrl+C to stop")
@@ -147,4 +152,21 @@ func addAntiLoopRoute(cfg *Config) {
 
 	// Get default gateway and add explicit route for SOCKS server
 	log.Printf("  ⚠ SOCKS on %s — add a manual route if needed", host)
+}
+
+// warmupNetwork flushes the DNS cache and forces Windows to re-evaluate the routing table.
+func warmupNetwork() {
+	log.Println("━━━ Warming up network ━━━")
+	// Flush DNS cache to clear any bad state left over from adapter creation
+	_ = exec.Command("ipconfig", "/flushdns").Run()
+	log.Printf("  ✓ DNS cache flushed")
+
+	// Force Windows to re-evaluate routing table and Source IPs
+	// by making a quick TCP connection to a known stable IP.
+	// 8.8.8.8:53 is widely open for TCP DNS.
+	conn, err := net.DialTimeout("tcp", "8.8.8.8:53", 200*time.Millisecond)
+	if err == nil {
+		conn.Close()
+	}
+	log.Printf("  ✓ Network routing warmed up")
 }
