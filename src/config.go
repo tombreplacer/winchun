@@ -24,6 +24,9 @@ type Config struct {
 	// Path to tun2socks executable (auto-detected if empty)
 	Tun2SocksPath string `json:"tun2socks_path"`
 
+	// Explicit IPs to route through the default gateway (bypass TUN)
+	UpstreamIPs []string `json:"upstream_ips"`
+
 	// Domains to route through SOCKS
 	Domains []string `json:"domains"`
 

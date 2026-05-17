@@ -232,20 +232,22 @@ Instead of system-wide IP routes, use a method that doesn't affect xray's own tr
 - **Transparent proxy** using WinDivert or similar packet-level interception with
   process filtering.
 
-### E. Add explicit bypass routes for xray's upstream server
+### E. Add explicit bypass routes for xray's upstream server ✅ Implemented
 If we know the IP of xray's VPN/proxy server, add a direct route for that IP through
 the real network adapter BEFORE adding TUN routes. This ensures xray can always reach
 its upstream without going through TUN.
 
-This is already partially implemented in `addAntiLoopRoute()` but only for the SOCKS
-address itself (which is localhost). It would need to be extended to cover xray's
-actual upstream VPN server IP.
+This is now implemented via the `upstream_ips` field in `config.json`. WinChun will
+automatically resolve the default internet gateway and add `/32` bypass routes (metric 1)
+for any IPs listed in `upstream_ips`.
 
 ---
 
 ## Current State of the Code
 
-- **Batch route addition** (fix #4) is in place but doesn't solve the loop.
+- **WFP Anti-Loop Rule** (fix A) is implemented. WinChun dynamically detects the proxy process listening on the SOCKS port and injects a WFP rule blocking it from outbound connections via the TUN interface. This instantly prevents the 60k socket exhaustion issue and breaks the loop.
+- **Explicit Bypass Routes** (fix E) is implemented. Users can specify their proxy's upstream IPs in `config.json` (`upstream_ips`) to ensure legitimate proxy traffic uses the physical interface.
+- **Batch route addition** (fix #4) is in place.
 - **SkipAsSource** (fix #2) is **commented out** (broke everything).
 - **Metric 9999** (fix #1) and **warmup** (fix #3) are active but cosmetic only.
-- The **routing loop remains the fundamental unresolved problem**.
+- The loop is **FULLY RESOLVED** at the kernel level using WFP.

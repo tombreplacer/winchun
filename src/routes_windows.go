@@ -5,10 +5,53 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"encoding/json"
 	"path/filepath"
 	"strings"
 	"sync"
 )
+
+// DefaultRouteInfo holds information about the default network route.
+type DefaultRouteInfo struct {
+	NextHop        string `json:"NextHop"`
+	InterfaceAlias string `json:"InterfaceAlias"`
+}
+
+// GetDefaultRoute finds the primary internet connection's gateway and interface.
+func GetDefaultRoute() (*DefaultRouteInfo, error) {
+	cmd := exec.Command("powershell", "-NoProfile", "-Command",
+		`Get-NetRoute -DestinationPrefix 0.0.0.0/0 | Sort-Object RouteMetric | Select-Object -First 1 -Property NextHop, InterfaceAlias | ConvertTo-Json`)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get default route: %w", err)
+	}
+
+	var res DefaultRouteInfo
+	if err := json.Unmarshal(output, &res); err != nil {
+		return nil, fmt.Errorf("failed to parse default route json (%s): %w", string(output), err)
+	}
+	return &res, nil
+}
+
+// AddBypassRoute adds a direct route to the given IP using the default gateway.
+func AddBypassRoute(ip string, route *DefaultRouteInfo) error {
+	args := []string{"interface", "ipv4", "add", "route", ip + "/32", `"`+route.InterfaceAlias+`"`}
+	if route.NextHop != "" && route.NextHop != "0.0.0.0" {
+		args = append(args, route.NextHop)
+	}
+	args = append(args, "metric=1", "store=active")
+
+	cmd := exec.Command("netsh", args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		outStr := strings.TrimSpace(string(output))
+		if strings.Contains(outStr, "already exists") {
+			return nil
+		}
+		return fmt.Errorf("%s: %w", outStr, err)
+	}
+	return nil
+}
 
 // RouteManager manages Windows routing table entries for intercepted domains.
 type RouteManager struct {

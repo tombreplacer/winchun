@@ -198,6 +198,7 @@ func (tm *TunManager) monitorLogs(r io.Reader, resolver *Resolver) {
 					if domain := resolver.DomainForIP(destIP); domain != "" {
 						msg = fmt.Sprintf("%s (%s)", msg, domain)
 					}
+
 				}
 
 				fmt.Printf("  [redirect] %s\n", msg)

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 )
@@ -76,6 +77,31 @@ func main() {
 		log.Fatalf("✗ TUN: %v", err)
 	}
 
+	// Initialize WFP to block proxy loop
+	wfp, err := NewWFPManager(cfg)
+	if err != nil {
+		log.Printf("  ⚠ WFP Init failed (needs Administrator?): %v", err)
+	} else {
+		// Extract port from SOCKS5
+		port := cfg.SOCKS5
+		idx := strings.LastIndex(port, ":")
+		if idx != -1 {
+			port = port[idx+1:]
+		}
+
+		log.Printf("━━━ WFP Anti-Loop ━━━")
+		log.Printf("  Finding proxy process listening on port %s...", port)
+		proxyExe := FindProcessByPort(port)
+		if proxyExe != "" {
+			log.Printf("  Found proxy process: %s", proxyExe)
+			if err := wfp.BlockProcessOnTUN(proxyExe); err != nil {
+				log.Printf("  ⚠ WFP block failed: %v", err)
+			}
+		} else {
+			log.Printf("  ⚠ Proxy process not found on port %s. WFP loop block skipped.", port)
+		}
+	}
+
 	// Initialize route manager and add routes
 	// We bind routes directly to the interface by name ("winchun0")
 	routes := NewRouteManager(cfg.TunName)
@@ -128,14 +154,24 @@ func main() {
 	log.Println("━━━ Cleanup ━━━")
 	routes.Cleanup()
 	tun.Stop()
+	if wfp != nil {
+		wfp.Close()
+	}
 
 	log.Println("✓ WinChun stopped. Bye!")
 }
 
-// addAntiLoopRoute ensures the SOCKS proxy itself is reachable directly
-// (not routed through TUN, which would cause an infinite loop).
+// addAntiLoopRoute ensures the SOCKS proxy itself and any upstream IPs
+// are reachable directly (not routed through TUN, which would cause an infinite loop).
 func addAntiLoopRoute(cfg *Config) {
-	// Extract host from socks5 address
+	defRoute, err := GetDefaultRoute()
+	if err != nil {
+		log.Printf("  ⚠ Failed to get default route for anti-loop: %v", err)
+		return
+	}
+	log.Printf("  ✓ Default internet route via %s (gw: %s)", defRoute.InterfaceAlias, defRoute.NextHop)
+
+	// 1. Check SOCKS proxy IP itself
 	host := cfg.SOCKS5
 	for i := len(host) - 1; i >= 0; i-- {
 		if host[i] == ':' {
@@ -143,15 +179,26 @@ func addAntiLoopRoute(cfg *Config) {
 			break
 		}
 	}
-
-	// Skip if SOCKS is on localhost
-	if host == "127.0.0.1" || host == "localhost" || host == "::1" {
-		log.Printf("  SOCKS on localhost — no anti-loop route needed")
-		return
+	if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+		log.Printf("  Adding bypass route for SOCKS proxy %s...", host)
+		if err := AddBypassRoute(host, defRoute); err != nil {
+			log.Printf("  ⚠ Failed to add bypass route for SOCKS %s: %v", host, err)
+		}
+	} else {
+		log.Printf("  SOCKS on localhost — no anti-loop route needed for SOCKS itself")
 	}
 
-	// Get default gateway and add explicit route for SOCKS server
-	log.Printf("  ⚠ SOCKS on %s — add a manual route if needed", host)
+	// 2. Check explicit Upstream IPs
+	for _, ip := range cfg.UpstreamIPs {
+		ip = strings.TrimSpace(ip)
+		if ip == "" {
+			continue
+		}
+		log.Printf("  Adding bypass route for upstream IP %s...", ip)
+		if err := AddBypassRoute(ip, defRoute); err != nil {
+			log.Printf("  ⚠ Failed to add bypass route for %s: %v", ip, err)
+		}
+	}
 }
 
 // warmupNetwork flushes the DNS cache and forces Windows to re-evaluate the routing table.
