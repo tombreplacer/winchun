@@ -3,12 +3,13 @@ package main
 import (
 	"fmt"
 	"log"
-	"net"
+	"net/netip"
 	"os/exec"
 	"path/filepath"
 	"strings"
 
 	"github.com/tailscale/wf"
+	"golang.org/x/sys/windows"
 )
 
 // WFPManager manages Windows Filtering Platform rules to prevent loops.
@@ -48,12 +49,18 @@ func (w *WFPManager) BlockProcessOnTUN(exePath string) error {
 		return fmt.Errorf("failed to get AppID for %s: %w", exePath, err)
 	}
 
-	tunIP := net.ParseIP(w.cfg.TunAddr).To4()
-	if tunIP == nil {
-		return fmt.Errorf("invalid TUN IPv4 address: %s", w.cfg.TunAddr)
+	tunIP, err := netip.ParseAddr(w.cfg.TunAddr)
+	if err != nil {
+		return fmt.Errorf("invalid TUN IPv4 address: %s: %w", w.cfg.TunAddr, err)
+	}
+
+	guid, err := windows.GenerateGUID()
+	if err != nil {
+		return fmt.Errorf("failed to generate GUID for WFP rule: %w", err)
 	}
 
 	rule := &wf.Rule{
+		ID:          wf.RuleID(guid),
 		Name:        "Block " + filepath.Base(exePath) + " on TUN",
 		Description: "Prevents routing loops by blocking proxy outbound via TUN",
 		Layer:       wf.LayerALEAuthConnectV4,

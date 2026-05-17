@@ -61,11 +61,16 @@ func (tm *TunManager) CheckDependencies() error {
 
 // Start launches tun2socks and configures the TUN adapter.
 func (tm *TunManager) Start(ctx context.Context, resolver *Resolver) error {
-	// Start tun2socks process with info log level to capture traffic
+	// Start tun2socks process with info log level to capture traffic.
+	// -tcp-auto-tuning: enables TCP receive buffer auto-tuning for better throughput
+	// -udp-timeout 30s: reduces UDP session lifetime from default (5m) to 30s,
+	//   so DNS-related SOCKS connections close faster and don't pile up in TIME_WAIT.
 	tm.cmd = exec.CommandContext(ctx, tm.cfg.Tun2SocksPath,
 		"-device", "tun://"+tm.cfg.TunName,
 		"-proxy", "socks5://"+tm.cfg.SOCKS5,
 		"-loglevel", "info",
+		"-tcp-auto-tuning",
+		"-udp-timeout", "30s",
 	)
 
 	stdout, err := tm.cmd.StdoutPipe()
