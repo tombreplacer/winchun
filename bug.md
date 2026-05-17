@@ -1,6 +1,8 @@
 # BUG: Routing Loop → Port Exhaustion → DNS Failure
 
-## Status: **UNRESOLVED**
+> **Примечание:** Этот файл был создан как лог/шпаргалка для ИИ-агента в процессе отладки и поиска решения. На данный момент проблема **успешно решена** с помощью Windows Filtering Platform (WFP).
+
+## Status: **RESOLVED**
 
 ---
 

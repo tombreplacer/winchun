@@ -130,7 +130,6 @@ func (tm *TunManager) configureAdapter() error {
 	// We force the metric to 9999 to give it the lowest possible priority.
 	_ = exec.Command("netsh", "interface", "ipv4", "set", "interface", tm.cfg.TunName, "metric=9999").Run()
 
-
 	log.Printf("  ✓ TUN adapter configured: %s/%s (no default gateway)", tm.cfg.TunAddr, tm.cfg.TunMask)
 	return nil
 }

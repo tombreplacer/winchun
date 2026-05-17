@@ -1,11 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
-	"encoding/json"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -35,7 +35,7 @@ func GetDefaultRoute() (*DefaultRouteInfo, error) {
 
 // AddBypassRoute adds a direct route to the given IP using the default gateway.
 func AddBypassRoute(ip string, route *DefaultRouteInfo) error {
-	args := []string{"interface", "ipv4", "add", "route", ip + "/32", `"`+route.InterfaceAlias+`"`}
+	args := []string{"interface", "ipv4", "add", "route", ip + "/32", `"` + route.InterfaceAlias + `"`}
 	if route.NextHop != "" && route.NextHop != "0.0.0.0" {
 		args = append(args, route.NextHop)
 	}
