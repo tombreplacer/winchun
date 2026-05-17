@@ -7,6 +7,8 @@
   "dns_refresh_seconds": 120,
   "tun2socks_path": "third_party/tun2socks-v3.exe",
   "upstream_ips": [],
+  "log_stdout": true,
+  "log_file": "",
   "domains": [
     "chatgpt.com",
     "*.chatgpt.com",

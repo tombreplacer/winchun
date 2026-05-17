@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -31,6 +32,12 @@ func main() {
 	cfg, err := LoadConfig(*configPath)
 	if err != nil {
 		log.Fatalf("✗ Config: %v", err)
+	}
+
+	// Setup logging based on config
+	logCleanup := setupLogging(cfg)
+	if logCleanup != nil {
+		defer logCleanup()
 	}
 
 	// Extract embedded binaries and override path
@@ -216,4 +223,44 @@ func warmupNetwork() {
 		conn.Close()
 	}
 	log.Printf("  ✓ Network routing warmed up")
+}
+
+// setupLogging configures log output based on config settings.
+// Returns a cleanup function to close the log file (if any).
+func setupLogging(cfg *Config) func() {
+	// Determine if stdout logging is enabled (default: true)
+	stdoutEnabled := cfg.LogStdout == nil || *cfg.LogStdout
+
+	var writers []io.Writer
+
+	if stdoutEnabled {
+		writers = append(writers, os.Stdout)
+	}
+
+	var logFile *os.File
+	if cfg.LogFile != "" {
+		f, err := os.OpenFile(cfg.LogFile, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			// Fall back to stdout-only if file can't be opened
+			log.Printf("⚠ Failed to open log file %s: %v", cfg.LogFile, err)
+		} else {
+			logFile = f
+			writers = append(writers, f)
+		}
+	}
+
+	if len(writers) == 0 {
+		// Both stdout and file are disabled — discard all logs
+		log.SetOutput(io.Discard)
+	} else if len(writers) == 1 {
+		log.SetOutput(writers[0])
+	} else {
+		log.SetOutput(io.MultiWriter(writers...))
+	}
+
+	// Return cleanup function
+	if logFile != nil {
+		return func() { logFile.Close() }
+	}
+	return nil
 }

@@ -27,6 +27,10 @@ type Config struct {
 	// Explicit IPs to route through the default gateway (bypass TUN)
 	UpstreamIPs []string `json:"upstream_ips"`
 
+	// Logging settings
+	LogStdout *bool  `json:"log_stdout"` // Log to console (default: true)
+	LogFile   string `json:"log_file"`   // Log to file path (empty = disabled)
+
 	// Domains to route through SOCKS
 	Domains []string `json:"domains"`
 
