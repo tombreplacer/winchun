@@ -12,6 +12,7 @@
 winchun_traffic.log
 config.json
 scratch/
+winchun.ico
 
 # Test binary, built with `go test -c`
 *.test
