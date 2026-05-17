@@ -1,4 +1,14 @@
-# WinChun
+<p align="center">
+  <img src="winchun.png" alt="WinChun Logo" width="150">
+</p>
+
+<h1 align="center">🥋 WinChun ☯️</h1>
+
+<p align="center">
+  <a href="https://github.com/tombreplacer/winchun/actions/workflows/release.yml"><img src="https://github.com/tombreplacer/winchun/actions/workflows/release.yml/badge.svg" alt="Release Status"></a>
+  <a href="https://github.com/tombreplacer/winchun/releases"><img src="https://img.shields.io/github/v/release/tombreplacer/winchun?logo=github&color=blue" alt="GitHub Release"></a>
+</p>
+
 
 Программа предназначена для преодоления региональных рестрикций, перенаправляя выбранные домены на SOCKS-прокси **без включения глобального туннельного режима** на самом VPN-клиенте. 
 
